@@ -24,11 +24,23 @@ const argv = yargs(hideBin(process.argv))
     type: "number",
     description: "Show the N least streamed tracks",
   })
-  .option("concurrency", {
+  .option("parallel", {
+    alias: "p",
+    type: "number",
+    description: "Number of parallel browser pages",
+    default: 5,
+  })
+  .option("invalidateCache", {
+    alias: "i",
+    type: "boolean",
+    description: "Ignore existing cache and re-scrape all tracks",
+    default: false,
+  })
+  .option("cacheExpiry", {
     alias: "c",
     type: "number",
-    description: "Number of parallel browser pages (default: 5)",
-    default: 5,
+    description: "Cache expiry in days (default: 30)",
+    default: 30,
   })
   .check((argv) => {
     if (!argv.top && !argv.bottom) {
@@ -36,9 +48,11 @@ const argv = yargs(hideBin(process.argv))
     }
     return true;
   })
-  .example("npm run rank-playlist -- 37i9dQZF1DXcBWIGoYBM5M --top 10")
-  .example("npm run rank-playlist -- 37i9dQZF1DXcBWIGoYBM5M --bottom 5")
-  .example("npm run rank-playlist -- 37i9dQZF1DXcBWIGoYBM5M --top 5 --bottom 5")
+  .example("npm run rank-playlist -- 1AfKAiVDQzfmE9gjhbk5UP --top 10")
+  .example("npm run rank-playlist -- 1AfKAiVDQzfmE9gjhbk5UP --bottom 5")
+  .example("npm run rank-playlist -- 1AfKAiVDQzfmE9gjhbk5UP --top 5 --bottom 5 --parallel 10")
+  .example("npm run rank-playlist -- 1AfKAiVDQzfmE9gjhbk5UP --top 10 --invalidateCache")
+  .example("npm run rank-playlist -- 1AfKAiVDQzfmE9gjhbk5UP --top 10 --cacheExpiry 7")
   .help()
   .argv;
 
@@ -60,8 +74,12 @@ async function main() {
   const tracks = await getPlaylistTracks(playlistId, token);
   console.log(`Found ${tracks.length} tracks`);
 
-  console.log(`Fetching play counts...`);
-  const playCounts = await getPlayCounts(playlistId, tracks, progressBar, argv.concurrency);
+  console.log("Fetching play counts...");
+  const playCounts = await getPlayCounts(playlistId, tracks, progressBar, {
+    concurrency: argv.concurrency,
+    invalidateCache: argv.invalidateCache,
+    cacheExpiryDays: argv.cacheExpiry,
+  });
 
   const ranked = mergeTracksWithPlayCounts(tracks, playCounts);
 

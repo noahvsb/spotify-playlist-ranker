@@ -3,7 +3,6 @@ import fs from "fs";
 import path from "path";
 
 const CACHE_DIR = path.resolve("cache");
-const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_RETRIES = 3;
 
 function cacheFile(playlistId) {
@@ -25,8 +24,8 @@ function writeCache(playlistId, cache) {
   fs.writeFileSync(cacheFile(playlistId), JSON.stringify(cache, null, 2));
 }
 
-function isFresh(entry) {
-  return entry && Date.now() < entry.expires;
+function isFresh(entry, now) {
+  return entry && now < entry.expires;
 }
 
 async function scrapeTrack(browser, track) {
@@ -50,9 +49,8 @@ async function scrapeTrack(browser, track) {
       await page.waitForSelector('[data-testid="playcount"]', { timeout: 15000 });
       const raw = await page.$eval('[data-testid="playcount"]', (el) => el.textContent.trim());
       return BigInt(raw.replace(/,/g, ""));
-    } catch (err) {
+    } catch {
       if (attempt === MAX_RETRIES) return null;
-      // brief pause before retry
       await new Promise((r) => setTimeout(r, 1000 * attempt));
     } finally {
       await page.close();
@@ -82,16 +80,27 @@ async function scrapePlayCounts(tracks, onProgress, concurrency) {
   return counts;
 }
 
-export async function getPlayCounts(playlistId, tracks, onProgress, concurrency = 5) {
-  const cache = readCache(playlistId);
+export async function getPlayCounts(playlistId, tracks, onProgress, options = {}) {
+  const {
+    concurrency = 5,
+    invalidateCache = false,
+    cacheExpiryDays = 30,
+  } = options;
+
+  const cacheTtlMs = cacheExpiryDays * 24 * 60 * 60 * 1000;
   const now = Date.now();
+  const cache = invalidateCache ? {} : readCache(playlistId);
+
+  if (invalidateCache) {
+    console.log("  Cache invalidated — re-scraping all tracks");
+  }
 
   const fresh = {};
   const stale = [];
 
   for (const track of tracks) {
     const entry = cache[track.id];
-    if (isFresh(entry)) {
+    if (isFresh(entry, now)) {
       fresh[track.id] = BigInt(entry.playcount);
     } else {
       stale.push(track);
@@ -99,7 +108,7 @@ export async function getPlayCounts(playlistId, tracks, onProgress, concurrency 
   }
 
   const cachedCount = Object.keys(fresh).length;
-  if (cachedCount > 0) {
+  if (!invalidateCache && cachedCount > 0) {
     console.log(`  Using ${cachedCount} cached, scraping ${stale.length} new/expired`);
   }
 
@@ -107,13 +116,15 @@ export async function getPlayCounts(playlistId, tracks, onProgress, concurrency 
   if (stale.length > 0) {
     scraped = await scrapePlayCounts(stale, onProgress, concurrency);
 
+    // Merge into the real cache file (not the emptied one) so we don't wipe unrelated tracks
+    const persistedCache = invalidateCache ? {} : readCache(playlistId);
     for (const [id, playcount] of Object.entries(scraped)) {
-      cache[id] = {
+      persistedCache[id] = {
         playcount: playcount.toString(),
-        expires: now + CACHE_TTL_MS,
+        expires: now + cacheTtlMs,
       };
     }
-    writeCache(playlistId, cache);
+    writeCache(playlistId, persistedCache);
   } else {
     console.log("  All tracks cached, skipping scrape");
   }

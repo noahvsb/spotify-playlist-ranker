@@ -1,0 +1,16 @@
+{
+  "name": "spotify-playlist-ranker",
+  "version": "1.0.0",
+  "description": "Rank Spotify playlist tracks by global play count",
+  "type": "module",
+  "scripts": {
+    "login": "node src/login.js",
+    "rank-playlist": "node src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2",
+    "puppeteer": "^24.15.0",
+    "yargs": "^17.7.2"
+  }
+}

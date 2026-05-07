@@ -2,7 +2,7 @@
 
 Rank any Spotify playlist by **real global play counts** — find the most streamed bangers and the deep cuts nobody's heard of.
 
-Uses the same internal API the Spotify web player uses to display stream counts on track pages.
+Scrapes play counts directly from Spotify track pages using a headless browser, the same number you see in the Spotify app.
 
 ## Setup
 
@@ -12,11 +12,13 @@ Uses the same internal API the Spotify web player uses to display stream counts 
 npm install
 ```
 
+Puppeteer will download Chromium on first install (~170MB, one time only).
+
 ### 2. Create a Spotify app
 
 1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and create an app
 2. When asked which API/SDKs you plan to use, tick **Web API** only
-3. Under **Redirect URIs**, add: `http://127.0.0.1:8888/callback` (use `127.0.0.1`, not `localhost` — Spotify blocks `localhost` over HTTP but allows `127.0.0.1`)
+3. Under **Redirect URIs**, add `http://127.0.0.1:8888/callback` (required by the form, not actually used)
 4. Copy your **Client ID** and **Client Secret**
 
 ### 3. Configure your environment
@@ -32,13 +34,13 @@ SPOTIFY_CLIENT_ID=your_client_id_here
 SPOTIFY_CLIENT_SECRET=your_client_secret_here
 ```
 
-### 4. Log in (one time only)
+Then log in once:
 
 ```bash
 npm run login
 ```
 
-This opens Spotify in your browser, asks you to authorise the app, then automatically saves a refresh token into your `.env`. You won't need to do this again unless you revoke the app's access.
+This opens Spotify in your browser, authorises the app, and saves a refresh token to your `.env` automatically.
 
 ## Usage
 
@@ -54,6 +56,7 @@ npm run rank-playlist -- <playlist> [options]
 |------|-------|-------------|
 | `--top N` | `-t N` | Show the N most streamed tracks |
 | `--bottom N` | `-b N` | Show the N least streamed tracks |
+| `--concurrency N` | `-c N` | Parallel browser pages (default: 5) |
 | `--help` | | Show usage info |
 
 At least one of `--top` or `--bottom` is required.
@@ -61,47 +64,62 @@ At least one of `--top` or `--bottom` is required.
 ### Examples
 
 ```bash
-# Top 10 most streamed tracks
 npm run rank-playlist -- 37i9dQZF1DXcBWIGoYBM5M --top 10
-
-# Bottom 5 least streamed tracks (full URL also works)
 npm run rank-playlist -- https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M --bottom 5
-
-# Both at once
-npm run rank-playlist -- 37i9dQZF1DXcBWIGoYBM5M --top 5 --bottom 5
+npm run rank-playlist -- 37i9dQZF1DXcBWIGoYBM5M -t 5 -b 5 -c 10
 ```
 
 ### Example output
 
 ```
 ─────────────────────────────────────────────────────────────────
-🔥 TOP 5 most streamed
+TOP 5 most streamed
 ─────────────────────────────────────────────────────────────────
- 1.  3,456,789,012 plays  Blinding Lights — The Weeknd
- 2.  2,891,234,567 plays  Shape of You — Ed Sheeran
- 3.  2,543,109,876 plays  Someone Like You — Adele
- 4.  2,201,987,654 plays  Rockstar — Post Malone, 21 Savage
- 5.  1,998,765,432 plays  Closer — The Chainsmokers, Halsey
+ 1.  3,258,580,848 plays  Just the Way You Are — Bruno Mars
+ 2.  3,182,062,706 plays  Mr. Brightside — The Killers
+ 3.  3,146,661,670 plays  In the End — Linkin Park
+ 4.  3,144,253,634 plays  Bohemian Rhapsody - Remastered 2011 — Queen
+ 5.  3,132,303,900 plays  When I Was Your Man — Bruno Mars
 
 ─────────────────────────────────────────────────────────────────
-💎 BOTTOM 5 least streamed
+BOTTOM 5 least streamed
 ─────────────────────────────────────────────────────────────────
- 1.         12,543 plays  B-Side Rarity — Some Artist
- 2.         18,901 plays  Deep Cut — Obscure Band
- 3.         24,310 plays  Album Track 7 — Niche Artist
- 4.         31,002 plays  Forgotten Single — Old Act
- 5.         45,678 plays  Intro Skit — Famous Rapper
+ 1.         187,628 plays  Auf und auf voll Lebenslust — Takeo Ischi
+ 2.         340,518 plays  Oración (From "Pokémon: The Rise of Darkrai") — Anthony Lo Re
+ 3.         379,266 plays  Appenzeller — Takeo Ischi
+ 4.       1,380,151 plays  Piet Piraat Is Op Vakantie — Piet Piraat
+ 5.       1,709,324 plays  Einen Jodler hör ich gern — Takeo Ischi
+```
+
+## Caching
+
+Play counts are cached in `cache/{playlist-id}.json` and are valid for **30 days**. On subsequent runs, only new or expired tracks are scraped — making re-runs near instant.
+
+```
+cache/
+  1AfKAiVDQzfmE9gjhbk5UP.json   ← one file per playlist
+```
+
+Each entry looks like:
+```json
+{
+  "67iAlVNDDdddxqSD2EZhFs": {
+    "playcount": "995023018",
+    "expires": 1748000000000
+  }
+}
 ```
 
 ## How it works
 
-1. **Auth** — Uses the standard OAuth Authorization Code flow to get a refresh token (one-time login), then exchanges it for a short-lived access token on each run
-2. **Playlist** — Fetches all tracks via the public Spotify API, paginating through playlists of any size
-3. **Play counts** — Queries `api-partner.spotify.com`, the internal GraphQL API Spotify's web player uses to render stream counts, in chunks of 50 tracks
-4. **Display** — Sorts and prints the results
+1. **Playlist** — Fetches all tracks via the Spotify API using client credentials (no user login needed)
+2. **Cache** — Checks `cache/{playlist-id}.json` for fresh play counts (< 30 days old)
+3. **Scrape** — Opens Spotify track pages in a headless Chromium browser and reads the `[data-testid="playcount"]` element for any tracks not in cache
+4. **Cache update** — Writes new play counts back to the cache file
+5. **Display** — Sorts and prints the results
 
 ## Notes
 
-- The internal partner API is undocumented and may change without notice. If play counts stop loading, the `getPlayCounts` function in `src/playcounts.js` is the place to investigate.
-- Works with any public playlist and any private playlist your account has access to.
-- The refresh token doesn't expire unless you revoke the app in your [Spotify account settings](https://www.spotify.com/account/apps/).
+- First run on a large playlist takes a few minutes. Subsequent runs are fast thanks to caching.
+- Increase `--concurrency` for faster scraping (be mindful of rate limiting).
+- The `data-testid="playcount"` selector may break if Spotify updates their web player markup.

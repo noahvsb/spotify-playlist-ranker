@@ -60,8 +60,8 @@ async function main() {
   const tracks = await getPlaylistTracks(playlistId, token);
   console.log(`Found ${tracks.length} tracks`);
 
-  console.log(`Scraping play counts (${argv.concurrency} pages in parallel)...`);
-  const playCounts = await getPlayCounts(tracks, progressBar, argv.concurrency);
+  console.log(`Fetching play counts...`);
+  const playCounts = await getPlayCounts(playlistId, tracks, progressBar, argv.concurrency);
 
   const ranked = mergeTracksWithPlayCounts(tracks, playCounts);
 
